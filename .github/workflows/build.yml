@@ -26,8 +26,11 @@ jobs:
       - name: Build executable
         run: pyinstaller --noconfirm PhotoConverter.spec
 
+      - name: Package distribution
+        run: Compress-Archive -Path dist\PhotoConverter -DestinationPath dist\PhotoConverter-win10.zip
+
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
           name: PhotoConverter
-          path: dist/PhotoConverter.exe
+          path: dist/PhotoConverter-win10.zip
