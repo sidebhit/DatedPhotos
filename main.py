@@ -84,7 +84,7 @@ class PhotoConverterApp(tk.Tk):
             main,
             text=(
                 "4:3 landscape → 1800×1200, date strip on the right.\n"
-                "16:9 and wider → 1800×1200, date strip on the bottom.\n"
+                "16:9 and wider → 1800×1200, date strip on the bottom (horizontal text).\n"
                 "3:4 portrait → 1200×1800, date strip on the bottom.\n"
                 "9:16 and taller → 1200×1800, date strip on the right."
             ),
