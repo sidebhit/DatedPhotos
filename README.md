@@ -24,6 +24,8 @@ Download `PhotoConverter-win10.zip` from the latest [GitHub Actions build artifa
 
 The app is packaged as a folder (not a single-file exe) so it starts quickly on Windows 10/11.
 
+The executable includes publisher metadata (`sidebhit`) in its Windows version info. To fully avoid SmartScreen warnings for unknown publishers, the `.exe` would still need to be code-signed with a trusted certificate.
+
 ## Build the `.exe` yourself
 
 On Windows:

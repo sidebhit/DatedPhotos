@@ -7,12 +7,15 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
+APP_AUTHOR = "sidebhit"
+APP_VERSION = "1.0.0"
+
 
 class PhotoConverterApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Photo Converter")
-        self.minsize(520, 320)
+        self.title(f"Photo Converter — {APP_AUTHOR}")
+        self.minsize(520, 340)
         self.resizable(True, False)
 
         self.selected_dir = tk.StringVar()
@@ -21,6 +24,7 @@ class PhotoConverterApp(tk.Tk):
         self.background_color = tk.StringVar(value="#FFFFFF")
         self.status_text = tk.StringVar(value="Select a folder containing photos.")
         self._busy = False
+        self._stop_event = threading.Event()
 
         self._build_ui()
 
@@ -96,17 +100,31 @@ class PhotoConverterApp(tk.Tk):
         action_row = ttk.Frame(main)
         action_row.pack(fill=tk.X, **padding)
 
-        self.convert_btn = ttk.Button(
-            action_row, text="Convert", command=self._start_convert
-        )
-        self.convert_btn.pack(side=tk.RIGHT)
-
         self.progress = ttk.Progressbar(action_row, mode="determinate", length=220)
-        self.progress.pack(side=tk.RIGHT, padx=(0, 12))
+        self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 12))
+
+        button_col = ttk.Frame(action_row)
+        button_col.pack(side=tk.RIGHT)
+
+        self.convert_btn = ttk.Button(
+            button_col, text="Convert", command=self._start_convert, width=12
+        )
+        self.convert_btn.pack(fill=tk.X)
+
+        self.stop_btn = ttk.Button(
+            button_col, text="Stop", command=self._stop_convert, width=12, state=tk.DISABLED
+        )
+        self.stop_btn.pack(fill=tk.X, pady=(6, 0))
 
         ttk.Label(main, textvariable=self.status_text, wraplength=480).pack(
             fill=tk.X, **padding
         )
+
+        ttk.Label(
+            main,
+            text=f"Version {APP_VERSION} · {APP_AUTHOR}",
+            foreground="gray",
+        ).pack(fill=tk.X, padx=12, pady=(0, 4))
 
     def _browse(self) -> None:
         directory = filedialog.askdirectory(title="Select photo folder")
@@ -131,6 +149,11 @@ class PhotoConverterApp(tk.Tk):
         if color and color[1]:
             self.background_color.set(color[1])
             self.bg_preview.configure(background=color[1])
+
+    def _set_converting(self, active: bool) -> None:
+        self._busy = active
+        self.convert_btn.configure(state=tk.DISABLED if active else tk.NORMAL)
+        self.stop_btn.configure(state=tk.NORMAL if active else tk.DISABLED)
 
     def _start_convert(self) -> None:
         if self._busy:
@@ -164,8 +187,8 @@ class PhotoConverterApp(tk.Tk):
             background_color=self.background_color.get(),
         )
 
-        self._busy = True
-        self.convert_btn.configure(state=tk.DISABLED)
+        self._stop_event.clear()
+        self._set_converting(True)
         self.progress.configure(value=0, maximum=1)
         self.status_text.set("Converting…")
 
@@ -176,6 +199,12 @@ class PhotoConverterApp(tk.Tk):
         )
         thread.start()
 
+    def _stop_convert(self) -> None:
+        if self._busy:
+            self._stop_event.set()
+            self.stop_btn.configure(state=tk.DISABLED)
+            self.status_text.set("Stopping after the current photo…")
+
     def _run_convert(self, source_dir: Path, settings) -> None:
         try:
             from converter import convert_directory
@@ -183,8 +212,15 @@ class PhotoConverterApp(tk.Tk):
             def on_progress(done: int, total: int, filename: str) -> None:
                 self.after(0, lambda: self._update_progress(done, total, filename))
 
-            count, output_dir, failures = convert_directory(source_dir, settings, on_progress)
-            self.after(0, lambda: self._on_complete(count, output_dir, failures))
+            count, output_dir, failures, stopped = convert_directory(
+                source_dir,
+                settings,
+                on_progress,
+                self._stop_event,
+            )
+            self.after(
+                0, lambda: self._on_complete(count, output_dir, failures, stopped)
+            )
         except Exception as exc:
             self.after(0, lambda: self._on_error(str(exc)))
 
@@ -192,9 +228,25 @@ class PhotoConverterApp(tk.Tk):
         self.progress.configure(maximum=max(total, 1), value=done)
         self.status_text.set(f"Converting ({done}/{total}): {filename}")
 
-    def _on_complete(self, count: int, output_dir: Path, failures: list[str]) -> None:
-        self._busy = False
-        self.convert_btn.configure(state=tk.NORMAL)
+    def _on_complete(
+        self,
+        count: int,
+        output_dir: Path,
+        failures: list[str],
+        stopped: bool,
+    ) -> None:
+        self._set_converting(False)
+
+        if stopped:
+            self.status_text.set(
+                f"Stopped — {count} photo(s) saved before cancel.\n{output_dir}"
+            )
+            messagebox.showinfo(
+                "Conversion stopped",
+                f"Stopped after converting {count} photo(s).\n\nOutput folder:\n{output_dir}",
+            )
+            return
+
         if count == 0 and not failures:
             self.status_text.set("No supported images were found in the selected folder.")
             messagebox.showinfo(
@@ -227,8 +279,7 @@ class PhotoConverterApp(tk.Tk):
         )
 
     def _on_error(self, message: str) -> None:
-        self._busy = False
-        self.convert_btn.configure(state=tk.NORMAL)
+        self._set_converting(False)
         self.status_text.set("Conversion failed.")
         messagebox.showerror("Error", message)
 

@@ -436,15 +436,21 @@ def convert_directory(
     source_dir: Path,
     settings: ConversionSettings,
     progress_callback=None,
-) -> tuple[int, Path, list[str]]:
+    stop_event=None,
+) -> tuple[int, Path, list[str], bool]:
     images = list_images(source_dir)
     output_dir = source_dir / settings.output_subdir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     converted = 0
     failures: list[str] = []
+    stopped = False
 
     for index, image_path in enumerate(images, start=1):
+        if stop_event is not None and stop_event.is_set():
+            stopped = True
+            break
+
         dest_name = image_path.stem + ".jpg"
         dest_path = output_dir / dest_name
         try:
@@ -455,4 +461,4 @@ def convert_directory(
         if progress_callback:
             progress_callback(index, len(images), image_path.name)
 
-    return converted, output_dir, failures
+    return converted, output_dir, failures, stopped
