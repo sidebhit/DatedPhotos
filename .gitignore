@@ -1,6 +1,5 @@
 __pycache__/
 *.py[cod]
-*.spec
 build/
 # dist/PhotoConverter.exe is produced by CI artifacts; keep build output ignored locally
 dist/
