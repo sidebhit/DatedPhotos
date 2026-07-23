@@ -7,8 +7,6 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-from converter import ConversionSettings, convert_directory
-
 
 class PhotoConverterApp(tk.Tk):
     def __init__(self) -> None:
@@ -132,6 +130,8 @@ class PhotoConverterApp(tk.Tk):
             messagebox.showerror("Invalid size", "Text size must be between 8 and 300.")
             return
 
+        from converter import ConversionSettings
+
         settings = ConversionSettings(
             text_size=text_size,
             text_color=self.text_color.get(),
@@ -149,8 +149,10 @@ class PhotoConverterApp(tk.Tk):
         )
         thread.start()
 
-    def _run_convert(self, source_dir: Path, settings: ConversionSettings) -> None:
+    def _run_convert(self, source_dir: Path, settings) -> None:
         try:
+            from converter import convert_directory
+
             def on_progress(done: int, total: int, filename: str) -> None:
                 self.after(0, lambda: self._update_progress(done, total, filename))
 

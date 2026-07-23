@@ -20,7 +20,9 @@ You can adjust **text size** and **text color** before converting.
 
 ## Download (no dependencies)
 
-Download `PhotoConverter.exe` from the latest [GitHub Actions build artifact](https://github.com/sidebhit/DatedPhotos/actions) or [release](https://github.com/sidebhit/DatedPhotos/releases). No Python install required — just run the `.exe`.
+Download `PhotoConverter-win10.zip` from the latest [GitHub Actions build artifact](https://github.com/sidebhit/DatedPhotos/actions). Unzip the folder and run `PhotoConverter.exe` inside it. No Python install required.
+
+The app is packaged as a folder (not a single-file exe) so it starts quickly on Windows 10/11.
 
 ## Build the `.exe` yourself
 
@@ -30,7 +32,7 @@ On Windows:
 build.bat
 ```
 
-Output: `dist\PhotoConverter.exe`
+Output: `dist\PhotoConverter\PhotoConverter.exe`
 
 Or manually:
 
