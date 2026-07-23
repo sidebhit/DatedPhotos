@@ -181,9 +181,10 @@ def _draw_vertical_centered_text(
     draw.text((pad_left, pad_top), text, font=font, fill=color)
     rotated = text_img.rotate(90, expand=True, resample=Image.Resampling.BICUBIC)
 
-    # Nudge left so glyphs are visually centered and clear of the page edge.
-    left_bias = max(6, region_w // 8)
-    paste_x = left + max((region_w - rotated.width) // 2 - left_bias, 2)
+    # Descender padding ends up on the right after rotation, so compensate when
+    # centering the glyphs left-to-right in the narrow strip.
+    paste_x = left + (region_w - rotated.width) // 2 + pad_bottom // 2
+    paste_x = min(max(paste_x, left), left + max(region_w - rotated.width, 0))
     paste_y = top + max((region_h - rotated.height) // 2, 0)
     canvas.paste(rotated, (paste_x, paste_y), rotated)
 
