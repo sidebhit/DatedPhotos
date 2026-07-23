@@ -172,7 +172,7 @@ def _plan_layout(img_w: int, img_h: int) -> LayoutPlan:
             image_x=(canvas_w - scaled_w) // 2,
             image_y=0,
             text_region=(0, canvas_h - strip_h, canvas_w, canvas_h),
-            vertical_text=True,
+            vertical_text=False,
         )
 
     if mode == LayoutMode.PORTRAIT_STANDARD:
