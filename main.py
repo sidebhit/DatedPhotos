@@ -182,8 +182,8 @@ class PhotoConverterApp(tk.Tk):
             def on_progress(done: int, total: int, filename: str) -> None:
                 self.after(0, lambda: self._update_progress(done, total, filename))
 
-            count, output_dir = convert_directory(source_dir, settings, on_progress)
-            self.after(0, lambda: self._on_complete(count, output_dir))
+            count, output_dir, failures = convert_directory(source_dir, settings, on_progress)
+            self.after(0, lambda: self._on_complete(count, output_dir, failures))
         except Exception as exc:
             self.after(0, lambda: self._on_error(str(exc)))
 
@@ -191,15 +191,31 @@ class PhotoConverterApp(tk.Tk):
         self.progress.configure(maximum=max(total, 1), value=done)
         self.status_text.set(f"Converting ({done}/{total}): {filename}")
 
-    def _on_complete(self, count: int, output_dir: Path) -> None:
+    def _on_complete(self, count: int, output_dir: Path, failures: list[str]) -> None:
         self._busy = False
         self.convert_btn.configure(state=tk.NORMAL)
-        if count == 0:
+        if count == 0 and not failures:
             self.status_text.set("No supported images were found in the selected folder.")
             messagebox.showinfo(
                 "Nothing to convert",
                 "No supported image files were found.\n\n"
                 "Supported formats: JPG, PNG, TIFF, BMP, WEBP",
+            )
+            return
+
+        if failures:
+            preview = "\n".join(failures[:5])
+            if len(failures) > 5:
+                preview += f"\n...and {len(failures) - 5} more"
+            self.status_text.set(
+                f"Done with warnings — {count} converted, {len(failures)} failed.\n{output_dir}"
+            )
+            messagebox.showwarning(
+                "Conversion finished with errors",
+                f"Converted {count} photo(s).\n"
+                f"Failed: {len(failures)}\n\n"
+                f"Output folder:\n{output_dir}\n\n"
+                f"Errors:\n{preview}",
             )
             return
 

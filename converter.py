@@ -13,6 +13,11 @@ LANDSCAPE_WIDTH = 1800
 LANDSCAPE_HEIGHT = 1200
 PORTRAIT_WIDTH = 1200
 PORTRAIT_HEIGHT = 1800
+LANDSCAPE_ASPECT = 4 / 3
+PORTRAIT_ASPECT = 3 / 4
+ASPECT_TOLERANCE = 0.02
+MAX_WORK_DIMENSION = 4000
+MIN_TEXT_STRIP = 50
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 
@@ -64,6 +69,53 @@ def format_photo_date(dt: datetime) -> str:
     return dt.strftime("%B %d, %Y")
 
 
+def _limit_image_size(img: Image.Image, max_dim: int = MAX_WORK_DIMENSION) -> Image.Image:
+    """Downscale very large inputs so processing stays fast and reliable."""
+    img_w, img_h = img.size
+    longest = max(img_w, img_h)
+    if longest <= max_dim:
+        return img
+    scale = max_dim / longest
+    return img.resize(
+        (max(1, round(img_w * scale)), max(1, round(img_h * scale))),
+        Image.Resampling.LANCZOS,
+    )
+
+
+def _normalize_to_standard_aspect(
+    img: Image.Image,
+    background_color: str,
+) -> Image.Image:
+    """
+    Letterbox non-standard images to 4:3 (landscape) or 3:4 (portrait).
+
+    The downstream layout assumes these aspect ratios. Panoramas, squares, and
+    other formats are padded (not cropped) before conversion.
+    """
+    img_w, img_h = img.size
+    is_landscape = img_w >= img_h
+    target_ratio = LANDSCAPE_ASPECT if is_landscape else PORTRAIT_ASPECT
+    current_ratio = img_w / img_h
+
+    if abs(current_ratio - target_ratio) <= ASPECT_TOLERANCE:
+        return img
+
+    if current_ratio > target_ratio:
+        new_w = img_w
+        new_h = max(1, round(img_w / target_ratio))
+    else:
+        new_h = img_h
+        new_w = max(1, round(img_h * target_ratio))
+
+    canvas = Image.new("RGB", (new_w, new_h), background_color)
+    scale = min(new_w / img_w, new_h / img_h)
+    scaled_w = max(1, round(img_w * scale))
+    scaled_h = max(1, round(img_h * scale))
+    resized = img.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
+    canvas.paste(resized, ((new_w - scaled_w) // 2, (new_h - scaled_h) // 2))
+    return canvas
+
+
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     candidates = [
         "C:/Windows/Fonts/segoeui.ttf",
@@ -109,6 +161,9 @@ def _fit_font_to_region(
     descender_pad = _font_descender_padding(font)
     padding_w = edge_pad * 2
     padding_h = edge_pad + descender_pad
+
+    if region_w <= padding_w or region_h <= padding_h:
+        return _load_font(8)
 
     scale = min(
         (region_w - padding_w) / text_w,
@@ -235,6 +290,11 @@ def _fit_landscape(img_w: int, img_h: int) -> tuple[int, int, int, int, int, int
         scaled_w = canvas_w
         scaled_h = round(scaled_h * scale)
         strip_w = 0
+    if 0 < strip_w < MIN_TEXT_STRIP:
+        scale = (canvas_w - MIN_TEXT_STRIP) / scaled_w
+        scaled_w = round(scaled_w * scale)
+        scaled_h = round(scaled_h * scale)
+        strip_w = canvas_w - scaled_w
     return canvas_w, canvas_h, scaled_w, scaled_h, strip_w, 0, 0
 
 
@@ -249,6 +309,11 @@ def _fit_portrait(img_w: int, img_h: int) -> tuple[int, int, int, int, int, int,
         scaled_h = canvas_h
         scaled_w = round(scaled_w * scale)
         strip_h = 0
+    if 0 < strip_h < MIN_TEXT_STRIP:
+        scale = (canvas_h - MIN_TEXT_STRIP) / scaled_h
+        scaled_w = round(scaled_w * scale)
+        scaled_h = round(scaled_h * scale)
+        strip_h = canvas_h - scaled_h
     return canvas_w, canvas_h, scaled_w, scaled_h, 0, 0, strip_h
 
 
@@ -261,6 +326,9 @@ def convert_image(
         img = img.convert("RGB")
         photo_date = get_photo_date(source_path, img)
         date_text = format_photo_date(photo_date)
+
+        img = _limit_image_size(img)
+        img = _normalize_to_standard_aspect(img, settings.background_color)
 
         img_w, img_h = img.size
         is_landscape = img_w >= img_h
@@ -322,16 +390,23 @@ def convert_directory(
     source_dir: Path,
     settings: ConversionSettings,
     progress_callback=None,
-) -> tuple[int, Path]:
+) -> tuple[int, Path, list[str]]:
     images = list_images(source_dir)
     output_dir = source_dir / settings.output_subdir
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    converted = 0
+    failures: list[str] = []
+
     for index, image_path in enumerate(images, start=1):
         dest_name = image_path.stem + ".jpg"
         dest_path = output_dir / dest_name
-        convert_image(image_path, dest_path, settings)
+        try:
+            convert_image(image_path, dest_path, settings)
+            converted += 1
+        except Exception as exc:
+            failures.append(f"{image_path.name}: {exc}")
         if progress_callback:
             progress_callback(index, len(images), image_path.name)
 
-    return len(images), output_dir
+    return converted, output_dir, failures
