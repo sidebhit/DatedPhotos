@@ -144,6 +144,16 @@ def _draw_horizontal_centered_text(
     )
 
 
+def _font_edge_padding(font: ImageFont.ImageFont) -> int:
+    size = getattr(font, "size", 48) or 48
+    return max(4, round(size * 0.15))
+
+
+def _font_descender_padding(font: ImageFont.ImageFont) -> int:
+    size = getattr(font, "size", 48) or 48
+    return round(size * 0.35)
+
+
 def _draw_vertical_centered_text(
     canvas: Image.Image,
     text: str,
@@ -165,12 +175,15 @@ def _draw_vertical_centered_text(
     if text_w == 0 or text_h == 0:
         return
 
+    edge_pad = _font_edge_padding(font)
+    descender_pad = _font_descender_padding(font)
+
     # Extra padding on the bottom before rotation becomes the outer (right) edge,
     # where descenders end up after a 90-degree counter-clockwise rotation.
-    pad_left = 8 - bbox[0]
-    pad_top = 8 - bbox[1]
-    pad_right = 8
-    pad_bottom = max(20, int(font.size * 0.35))
+    pad_left = edge_pad - bbox[0]
+    pad_top = edge_pad - bbox[1]
+    pad_right = edge_pad
+    pad_bottom = descender_pad
 
     text_img = Image.new(
         "RGBA",
@@ -181,9 +194,9 @@ def _draw_vertical_centered_text(
     draw.text((pad_left, pad_top), text, font=font, fill=color)
     rotated = text_img.rotate(90, expand=True, resample=Image.Resampling.BICUBIC)
 
-    # Descender padding ends up on the right after rotation, so compensate when
-    # centering the glyphs left-to-right in the narrow strip.
-    paste_x = left + (region_w - rotated.width) // 2 + pad_bottom // 2
+    # Descender padding ends up on the right after rotation; offset scales with font size.
+    center_offset = descender_pad // 2
+    paste_x = left + (region_w - rotated.width) // 2 + center_offset
     paste_x = min(max(paste_x, left), left + max(region_w - rotated.width, 0))
     paste_y = top + max((region_h - rotated.height) // 2, 0)
     canvas.paste(rotated, (paste_x, paste_y), rotated)
