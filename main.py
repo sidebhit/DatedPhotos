@@ -83,9 +83,10 @@ class PhotoConverterApp(tk.Tk):
         info = ttk.Label(
             main,
             text=(
-                "Landscape photos become 1800×1200 with padding on the right.\n"
-                "Portrait photos become 1200×1800 with padding on the bottom.\n"
-                "The capture date is centered in the padding, parallel to the short page edge."
+                "4:3 landscape → 1800×1200, date strip on the right.\n"
+                "16:9 and wider → 1800×1200, date strip on the bottom.\n"
+                "3:4 portrait → 1200×1800, date strip on the bottom.\n"
+                "9:16 and taller → 1200×1800, date strip on the right."
             ),
             justify=tk.LEFT,
             wraplength=480,
