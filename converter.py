@@ -83,6 +83,16 @@ def _text_bbox(text: str, font: ImageFont.ImageFont) -> tuple[int, int, int, int
     return draw.textbbox((0, 0), text, font=font)
 
 
+def _font_edge_padding(font: ImageFont.ImageFont) -> int:
+    size = getattr(font, "size", 48) or 48
+    return max(4, round(size * 0.15))
+
+
+def _font_descender_padding(font: ImageFont.ImageFont) -> int:
+    size = getattr(font, "size", 48) or 48
+    return round(size * 0.35)
+
+
 def _fit_font_to_region(
     text: str,
     font: ImageFont.ImageFont,
@@ -95,8 +105,16 @@ def _fit_font_to_region(
     if text_w == 0 or text_h == 0:
         return font
 
-    padding = 16
-    scale = min((region_w - padding) / text_w, (region_h - padding) / text_h, 1.0)
+    edge_pad = _font_edge_padding(font)
+    descender_pad = _font_descender_padding(font)
+    padding_w = edge_pad * 2
+    padding_h = edge_pad + descender_pad
+
+    scale = min(
+        (region_w - padding_w) / text_w,
+        (region_h - padding_h) / text_h,
+        1.0,
+    )
     if scale < 1.0:
         new_size = max(int(font.size * scale), 8)
         return _load_font(new_size)
@@ -131,27 +149,31 @@ def _draw_horizontal_centered_text(
     bbox = _text_bbox(text, font)
     text_w = bbox[2] - bbox[0]
     text_h = bbox[3] - bbox[1]
+    if text_w == 0 or text_h == 0:
+        return
 
-    draw = ImageDraw.Draw(canvas)
-    draw.text(
-        (
-            left + (region_w - text_w) // 2 - bbox[0],
-            top + (region_h - text_h) // 2 - bbox[1],
-        ),
-        text,
-        font=font,
-        fill=color,
+    edge_pad = _font_edge_padding(font)
+    descender_pad = _font_descender_padding(font)
+
+    pad_left = edge_pad - bbox[0]
+    pad_top = edge_pad - bbox[1]
+    pad_right = edge_pad
+    pad_bottom = descender_pad
+
+    text_img = Image.new(
+        "RGBA",
+        (text_w + pad_left + pad_right, text_h + pad_top + pad_bottom),
+        (0, 0, 0, 0),
     )
+    draw = ImageDraw.Draw(text_img)
+    draw.text((pad_left, pad_top), text, font=font, fill=color)
 
-
-def _font_edge_padding(font: ImageFont.ImageFont) -> int:
-    size = getattr(font, "size", 48) or 48
-    return max(4, round(size * 0.15))
-
-
-def _font_descender_padding(font: ImageFont.ImageFont) -> int:
-    size = getattr(font, "size", 48) or 48
-    return round(size * 0.35)
+    # Descender padding sits below the baseline; offset scales with font size.
+    center_offset_y = descender_pad // 2
+    paste_x = left + (region_w - text_img.width) // 2
+    paste_y = top + (region_h - text_img.height) // 2 + center_offset_y
+    paste_y = min(max(paste_y, top), top + max(region_h - text_img.height, 0))
+    canvas.paste(text_img, (paste_x, paste_y), text_img)
 
 
 def _draw_vertical_centered_text(
