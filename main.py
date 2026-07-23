@@ -18,6 +18,7 @@ class PhotoConverterApp(tk.Tk):
         self.selected_dir = tk.StringVar()
         self.text_size = tk.IntVar(value=48)
         self.text_color = tk.StringVar(value="#333333")
+        self.background_color = tk.StringVar(value="#FFFFFF")
         self.status_text = tk.StringVar(value="Select a folder containing photos.")
         self._busy = False
 
@@ -52,7 +53,7 @@ class PhotoConverterApp(tk.Tk):
         ).pack(side=tk.RIGHT)
 
         color_row = ttk.Frame(options)
-        color_row.pack(fill=tk.X)
+        color_row.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(color_row, text="Text color").pack(side=tk.LEFT)
         self.color_preview = tk.Label(
             color_row,
@@ -63,6 +64,21 @@ class PhotoConverterApp(tk.Tk):
         )
         self.color_preview.pack(side=tk.RIGHT, padx=(8, 0))
         ttk.Button(color_row, text="Choose…", command=self._choose_color).pack(side=tk.RIGHT)
+
+        bg_row = ttk.Frame(options)
+        bg_row.pack(fill=tk.X)
+        ttk.Label(bg_row, text="Background color").pack(side=tk.LEFT)
+        self.bg_preview = tk.Label(
+            bg_row,
+            width=4,
+            background=self.background_color.get(),
+            relief=tk.SUNKEN,
+            borderwidth=1,
+        )
+        self.bg_preview.pack(side=tk.RIGHT, padx=(8, 0))
+        ttk.Button(bg_row, text="Choose…", command=self._choose_background_color).pack(
+            side=tk.RIGHT
+        )
 
         info = ttk.Label(
             main,
@@ -106,6 +122,15 @@ class PhotoConverterApp(tk.Tk):
             self.text_color.set(color[1])
             self.color_preview.configure(background=color[1])
 
+    def _choose_background_color(self) -> None:
+        color = colorchooser.askcolor(
+            color=self.background_color.get(),
+            title="Choose padding background color",
+        )
+        if color and color[1]:
+            self.background_color.set(color[1])
+            self.bg_preview.configure(background=color[1])
+
     def _start_convert(self) -> None:
         if self._busy:
             return
@@ -135,6 +160,7 @@ class PhotoConverterApp(tk.Tk):
         settings = ConversionSettings(
             text_size=text_size,
             text_color=self.text_color.get(),
+            background_color=self.background_color.get(),
         )
 
         self._busy = True

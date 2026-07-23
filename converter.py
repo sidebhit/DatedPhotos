@@ -1,4 +1,4 @@
-"""Photo conversion: scale images into dated canvases with white padding."""
+"""Photo conversion: scale images into dated canvases with colored padding."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ EXIF_DATETIME = EXIF_TAG_NAMES.get("DateTime", 306)
 class ConversionSettings:
     text_size: int = 48
     text_color: str = "#333333"
+    background_color: str = "#FFFFFF"
     output_subdir: str = "converted"
 
 
@@ -76,9 +77,10 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def _text_bbox(text: str, font: ImageFont.ImageFont) -> tuple[int, int]:
-    bbox = font.getbbox(text)
-    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+def _text_bbox(text: str, font: ImageFont.ImageFont) -> tuple[int, int, int, int]:
+    """Return left, top, right, bottom bbox for rendered text."""
+    draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    return draw.textbbox((0, 0), text, font=font)
 
 
 def _fit_font_to_region(
@@ -87,16 +89,28 @@ def _fit_font_to_region(
     region_w: int,
     region_h: int,
 ) -> ImageFont.ImageFont:
-    text_w, text_h = _text_bbox(text, font)
+    bbox = _text_bbox(text, font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
     if text_w == 0 or text_h == 0:
         return font
 
-    padding = 8
+    padding = 16
     scale = min((region_w - padding) / text_w, (region_h - padding) / text_h, 1.0)
     if scale < 1.0:
         new_size = max(int(font.size * scale), 8)
         return _load_font(new_size)
     return font
+
+
+def _fill_region(
+    canvas: Image.Image,
+    region: tuple[int, int, int, int],
+    color: str,
+) -> None:
+    left, top, right, bottom = region
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle((left, top, right - 1, bottom - 1), fill=color)
 
 
 def _draw_horizontal_centered_text(
@@ -105,18 +119,25 @@ def _draw_horizontal_centered_text(
     region: tuple[int, int, int, int],
     font: ImageFont.ImageFont,
     color: str,
+    background_color: str,
 ) -> None:
     """Draw horizontal text centered in region (parallel to the page short edge)."""
+    _fill_region(canvas, region, background_color)
     left, top, right, bottom = region
     region_w = right - left
     region_h = bottom - top
 
     font = _fit_font_to_region(text, font, region_w, region_h)
-    text_w, text_h = _text_bbox(text, font)
+    bbox = _text_bbox(text, font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
 
     draw = ImageDraw.Draw(canvas)
     draw.text(
-        (left + (region_w - text_w) // 2, top + (region_h - text_h) // 2),
+        (
+            left + (region_w - text_w) // 2 - bbox[0],
+            top + (region_h - text_h) // 2 - bbox[1],
+        ),
         text,
         font=font,
         fill=color,
@@ -129,24 +150,41 @@ def _draw_vertical_centered_text(
     region: tuple[int, int, int, int],
     font: ImageFont.ImageFont,
     color: str,
+    background_color: str,
 ) -> None:
     """Draw vertical text centered in region (parallel to the page short edge)."""
+    _fill_region(canvas, region, background_color)
     left, top, right, bottom = region
     region_w = right - left
     region_h = bottom - top
 
     font = _fit_font_to_region(text, font, region_h, region_w)
-    text_w, text_h = _text_bbox(text, font)
+    bbox = _text_bbox(text, font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
     if text_w == 0 or text_h == 0:
         return
 
-    text_img = Image.new("RGBA", (text_w + 4, text_h + 4), (255, 255, 255, 0))
+    # Extra padding on the bottom before rotation becomes the outer (right) edge,
+    # where descenders end up after a 90-degree counter-clockwise rotation.
+    pad_left = 8 - bbox[0]
+    pad_top = 8 - bbox[1]
+    pad_right = 8
+    pad_bottom = max(20, int(font.size * 0.35))
+
+    text_img = Image.new(
+        "RGBA",
+        (text_w + pad_left + pad_right, text_h + pad_top + pad_bottom),
+        (0, 0, 0, 0),
+    )
     draw = ImageDraw.Draw(text_img)
-    draw.text((2, 2), text, font=font, fill=color)
+    draw.text((pad_left, pad_top), text, font=font, fill=color)
     rotated = text_img.rotate(90, expand=True, resample=Image.Resampling.BICUBIC)
 
-    paste_x = left + (region_w - rotated.width) // 2
-    paste_y = top + (region_h - rotated.height) // 2
+    # Nudge left so glyphs are visually centered and clear of the page edge.
+    left_bias = max(6, region_w // 8)
+    paste_x = left + max((region_w - rotated.width) // 2 - left_bias, 2)
+    paste_y = top + max((region_h - rotated.height) // 2, 0)
     canvas.paste(rotated, (paste_x, paste_y), rotated)
 
 
@@ -202,7 +240,7 @@ def convert_image(
             strip_w = 0
 
         resized = img.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
-        canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
+        canvas = Image.new("RGB", (canvas_w, canvas_h), settings.background_color)
         font = _load_font(settings.text_size)
 
         if is_landscape:
@@ -211,7 +249,12 @@ def convert_image(
             canvas.paste(resized, (offset_x, offset_y))
             text_region = (canvas_w - strip_w, 0, canvas_w, canvas_h)
             _draw_vertical_centered_text(
-                canvas, date_text, text_region, font, settings.text_color
+                canvas,
+                date_text,
+                text_region,
+                font,
+                settings.text_color,
+                settings.background_color,
             )
         else:
             offset_x = (canvas_w - scaled_w) // 2
@@ -219,7 +262,12 @@ def convert_image(
             canvas.paste(resized, (offset_x, offset_y))
             text_region = (0, canvas_h - strip_h, canvas_w, canvas_h)
             _draw_horizontal_centered_text(
-                canvas, date_text, text_region, font, settings.text_color
+                canvas,
+                date_text,
+                text_region,
+                font,
+                settings.text_color,
+                settings.background_color,
             )
 
         dest_path.parent.mkdir(parents=True, exist_ok=True)
