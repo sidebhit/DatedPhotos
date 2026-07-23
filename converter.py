@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ExifTags
@@ -15,7 +16,6 @@ PORTRAIT_WIDTH = 1200
 PORTRAIT_HEIGHT = 1800
 LANDSCAPE_ASPECT = 4 / 3
 PORTRAIT_ASPECT = 3 / 4
-ASPECT_TOLERANCE = 0.02
 MAX_WORK_DIMENSION = 4000
 MIN_TEXT_STRIP = 50
 
@@ -24,6 +24,28 @@ SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp
 EXIF_TAG_NAMES = {v: k for k, v in ExifTags.TAGS.items()}
 EXIF_DATETIME_ORIGINAL = EXIF_TAG_NAMES.get("DateTimeOriginal", 36867)
 EXIF_DATETIME = EXIF_TAG_NAMES.get("DateTime", 306)
+
+
+class LayoutMode(Enum):
+    """How an image is placed on the output canvas."""
+
+    LANDSCAPE_STANDARD = "landscape_standard"  # up to 4:3: strip on right
+    LANDSCAPE_WIDE = "landscape_wide"  # wider than 4:3 (e.g. 16:9): strip on bottom
+    PORTRAIT_STANDARD = "portrait_standard"  # up to 3:4: strip on bottom
+    PORTRAIT_TALL = "portrait_tall"  # taller than 3:4 (e.g. 9:16): strip on right
+
+
+@dataclass
+class LayoutPlan:
+    mode: LayoutMode
+    canvas_w: int
+    canvas_h: int
+    scaled_w: int
+    scaled_h: int
+    image_x: int
+    image_y: int
+    text_region: tuple[int, int, int, int]
+    vertical_text: bool
 
 
 @dataclass
@@ -82,38 +104,123 @@ def _limit_image_size(img: Image.Image, max_dim: int = MAX_WORK_DIMENSION) -> Im
     )
 
 
-def _normalize_to_standard_aspect(
-    img: Image.Image,
-    background_color: str,
-) -> Image.Image:
-    """
-    Letterbox non-standard images to 4:3 (landscape) or 3:4 (portrait).
+def _choose_layout_mode(img_w: int, img_h: int) -> LayoutMode:
+    aspect = img_w / img_h
+    if img_w >= img_h:
+        if aspect > LANDSCAPE_ASPECT:
+            return LayoutMode.LANDSCAPE_WIDE
+        return LayoutMode.LANDSCAPE_STANDARD
+    if aspect < PORTRAIT_ASPECT:
+        return LayoutMode.PORTRAIT_TALL
+    return LayoutMode.PORTRAIT_STANDARD
 
-    The downstream layout assumes these aspect ratios. Panoramas, squares, and
-    other formats are padded (not cropped) before conversion.
-    """
-    img_w, img_h = img.size
-    is_landscape = img_w >= img_h
-    target_ratio = LANDSCAPE_ASPECT if is_landscape else PORTRAIT_ASPECT
-    current_ratio = img_w / img_h
 
-    if abs(current_ratio - target_ratio) <= ASPECT_TOLERANCE:
-        return img
+def _ensure_min_strip(strip: int, content_size: int, canvas_size: int) -> tuple[int, int]:
+    """Shrink content slightly so the text strip meets the minimum width/height."""
+    if strip <= 0 or strip >= MIN_TEXT_STRIP:
+        return content_size, strip
+    content_size = round(content_size * (canvas_size - MIN_TEXT_STRIP) / canvas_size)
+    strip = canvas_size - content_size
+    return content_size, strip
 
-    if current_ratio > target_ratio:
-        new_w = img_w
-        new_h = max(1, round(img_w / target_ratio))
-    else:
-        new_h = img_h
-        new_w = max(1, round(img_h * target_ratio))
 
-    canvas = Image.new("RGB", (new_w, new_h), background_color)
-    scale = min(new_w / img_w, new_h / img_h)
-    scaled_w = max(1, round(img_w * scale))
-    scaled_h = max(1, round(img_h * scale))
-    resized = img.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
-    canvas.paste(resized, ((new_w - scaled_w) // 2, (new_h - scaled_h) // 2))
-    return canvas
+def _plan_layout(img_w: int, img_h: int) -> LayoutPlan:
+    mode = _choose_layout_mode(img_w, img_h)
+
+    if mode == LayoutMode.LANDSCAPE_STANDARD:
+        canvas_w, canvas_h = LANDSCAPE_WIDTH, LANDSCAPE_HEIGHT
+        scaled_h = canvas_h
+        scaled_w = round(scaled_h * img_w / img_h)
+        strip_w = canvas_w - scaled_w
+        if strip_w < 0:
+            scale = canvas_w / scaled_w
+            scaled_w = canvas_w
+            scaled_h = round(scaled_h * scale)
+            strip_w = 0
+        scaled_w, strip_w = _ensure_min_strip(strip_w, scaled_w, canvas_w)
+        scaled_h = round(scaled_w * img_h / img_w)
+        return LayoutPlan(
+            mode=mode,
+            canvas_w=canvas_w,
+            canvas_h=canvas_h,
+            scaled_w=scaled_w,
+            scaled_h=scaled_h,
+            image_x=0,
+            image_y=(canvas_h - scaled_h) // 2,
+            text_region=(canvas_w - strip_w, 0, canvas_w, canvas_h),
+            vertical_text=True,
+        )
+
+    if mode == LayoutMode.LANDSCAPE_WIDE:
+        canvas_w, canvas_h = LANDSCAPE_WIDTH, LANDSCAPE_HEIGHT
+        scaled_w = canvas_w
+        scaled_h = round(scaled_w * img_h / img_w)
+        strip_h = canvas_h - scaled_h
+        if strip_h < 0:
+            scale = canvas_h / scaled_h
+            scaled_h = canvas_h
+            scaled_w = round(scaled_w * scale)
+            strip_h = 0
+        scaled_h, strip_h = _ensure_min_strip(strip_h, scaled_h, canvas_h)
+        scaled_w = round(scaled_h * img_w / img_h)
+        return LayoutPlan(
+            mode=mode,
+            canvas_w=canvas_w,
+            canvas_h=canvas_h,
+            scaled_w=scaled_w,
+            scaled_h=scaled_h,
+            image_x=(canvas_w - scaled_w) // 2,
+            image_y=0,
+            text_region=(0, canvas_h - strip_h, canvas_w, canvas_h),
+            vertical_text=True,
+        )
+
+    if mode == LayoutMode.PORTRAIT_STANDARD:
+        canvas_w, canvas_h = PORTRAIT_WIDTH, PORTRAIT_HEIGHT
+        scaled_w = canvas_w
+        scaled_h = round(scaled_w * img_h / img_w)
+        strip_h = canvas_h - scaled_h
+        if strip_h < 0:
+            scale = canvas_h / scaled_h
+            scaled_h = canvas_h
+            scaled_w = round(scaled_w * scale)
+            strip_h = 0
+        scaled_h, strip_h = _ensure_min_strip(strip_h, scaled_h, canvas_h)
+        scaled_w = round(scaled_h * img_w / img_h)
+        return LayoutPlan(
+            mode=mode,
+            canvas_w=canvas_w,
+            canvas_h=canvas_h,
+            scaled_w=scaled_w,
+            scaled_h=scaled_h,
+            image_x=(canvas_w - scaled_w) // 2,
+            image_y=0,
+            text_region=(0, canvas_h - strip_h, canvas_w, canvas_h),
+            vertical_text=False,
+        )
+
+    canvas_w, canvas_h = PORTRAIT_WIDTH, PORTRAIT_HEIGHT
+    scaled_h = canvas_h
+    scaled_w = round(scaled_h * img_w / img_h)
+    strip_w = canvas_w - scaled_w
+    if strip_w < 0:
+        scale = canvas_w / scaled_w
+        scaled_w = canvas_w
+        scaled_h = round(scaled_h * scale)
+        strip_w = 0
+    scaled_w, strip_w = _ensure_min_strip(strip_w, scaled_w, canvas_w)
+    scaled_h = round(scaled_w * img_h / img_w)
+    return LayoutPlan(
+        mode=LayoutMode.PORTRAIT_TALL,
+        canvas_w=canvas_w,
+        canvas_h=canvas_h,
+        scaled_w=scaled_w,
+        scaled_h=scaled_h,
+        image_x=0,
+        image_y=(canvas_h - scaled_h) // 2,
+        text_region=(canvas_w - strip_w, 0, canvas_w, canvas_h),
+        vertical_text=True,
+    )
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -223,7 +330,6 @@ def _draw_horizontal_centered_text(
     draw = ImageDraw.Draw(text_img)
     draw.text((pad_left, pad_top), text, font=font, fill=color)
 
-    # Descender padding sits below the baseline; offset scales with font size.
     center_offset_y = descender_pad // 2
     paste_x = left + (region_w - text_img.width) // 2
     paste_y = top + (region_h - text_img.height) // 2 + center_offset_y
@@ -255,8 +361,6 @@ def _draw_vertical_centered_text(
     edge_pad = _font_edge_padding(font)
     descender_pad = _font_descender_padding(font)
 
-    # Extra padding on the bottom before rotation becomes the outer (right) edge,
-    # where descenders end up after a 90-degree counter-clockwise rotation.
     pad_left = edge_pad - bbox[0]
     pad_top = edge_pad - bbox[1]
     pad_right = edge_pad
@@ -271,50 +375,11 @@ def _draw_vertical_centered_text(
     draw.text((pad_left, pad_top), text, font=font, fill=color)
     rotated = text_img.rotate(90, expand=True, resample=Image.Resampling.BICUBIC)
 
-    # Descender padding ends up on the right after rotation; offset scales with font size.
     center_offset = descender_pad // 2
     paste_x = left + (region_w - rotated.width) // 2 + center_offset
     paste_x = min(max(paste_x, left), left + max(region_w - rotated.width, 0))
     paste_y = top + max((region_h - rotated.height) // 2, 0)
     canvas.paste(rotated, (paste_x, paste_y), rotated)
-
-
-def _fit_landscape(img_w: int, img_h: int) -> tuple[int, int, int, int, int, int, int]:
-    """Return canvas size, scaled image size, and right strip width."""
-    canvas_w, canvas_h = LANDSCAPE_WIDTH, LANDSCAPE_HEIGHT
-    scaled_h = canvas_h
-    scaled_w = round(scaled_h * img_w / img_h)
-    strip_w = canvas_w - scaled_w
-    if strip_w < 0:
-        scale = canvas_w / scaled_w
-        scaled_w = canvas_w
-        scaled_h = round(scaled_h * scale)
-        strip_w = 0
-    if 0 < strip_w < MIN_TEXT_STRIP:
-        scale = (canvas_w - MIN_TEXT_STRIP) / scaled_w
-        scaled_w = round(scaled_w * scale)
-        scaled_h = round(scaled_h * scale)
-        strip_w = canvas_w - scaled_w
-    return canvas_w, canvas_h, scaled_w, scaled_h, strip_w, 0, 0
-
-
-def _fit_portrait(img_w: int, img_h: int) -> tuple[int, int, int, int, int, int, int]:
-    """Return canvas size, scaled image size, and bottom strip height."""
-    canvas_w, canvas_h = PORTRAIT_WIDTH, PORTRAIT_HEIGHT
-    scaled_w = canvas_w
-    scaled_h = round(scaled_w * img_h / img_w)
-    strip_h = canvas_h - scaled_h
-    if strip_h < 0:
-        scale = canvas_h / scaled_h
-        scaled_h = canvas_h
-        scaled_w = round(scaled_w * scale)
-        strip_h = 0
-    if 0 < strip_h < MIN_TEXT_STRIP:
-        scale = (canvas_h - MIN_TEXT_STRIP) / scaled_h
-        scaled_w = round(scaled_w * scale)
-        scaled_h = round(scaled_h * scale)
-        strip_h = canvas_h - scaled_h
-    return canvas_w, canvas_h, scaled_w, scaled_h, 0, 0, strip_h
 
 
 def convert_image(
@@ -328,47 +393,28 @@ def convert_image(
         date_text = format_photo_date(photo_date)
 
         img = _limit_image_size(img)
-        img = _normalize_to_standard_aspect(img, settings.background_color)
-
         img_w, img_h = img.size
-        is_landscape = img_w >= img_h
+        plan = _plan_layout(img_w, img_h)
 
-        if is_landscape:
-            canvas_w, canvas_h, scaled_w, scaled_h, strip_w, _, _ = _fit_landscape(
-                img_w, img_h
-            )
-        else:
-            canvas_w, canvas_h, scaled_w, scaled_h, _, _, strip_h = _fit_portrait(
-                img_w, img_h
-            )
-            strip_w = 0
-
-        resized = img.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
-        canvas = Image.new("RGB", (canvas_w, canvas_h), settings.background_color)
+        resized = img.resize((plan.scaled_w, plan.scaled_h), Image.Resampling.LANCZOS)
+        canvas = Image.new("RGB", (plan.canvas_w, plan.canvas_h), settings.background_color)
+        canvas.paste(resized, (plan.image_x, plan.image_y))
         font = _load_font(settings.text_size)
 
-        if is_landscape:
-            offset_x = 0
-            offset_y = (canvas_h - scaled_h) // 2
-            canvas.paste(resized, (offset_x, offset_y))
-            text_region = (canvas_w - strip_w, 0, canvas_w, canvas_h)
+        if plan.vertical_text:
             _draw_vertical_centered_text(
                 canvas,
                 date_text,
-                text_region,
+                plan.text_region,
                 font,
                 settings.text_color,
                 settings.background_color,
             )
         else:
-            offset_x = (canvas_w - scaled_w) // 2
-            offset_y = 0
-            canvas.paste(resized, (offset_x, offset_y))
-            text_region = (0, canvas_h - strip_h, canvas_w, canvas_h)
             _draw_horizontal_centered_text(
                 canvas,
                 date_text,
-                text_region,
+                plan.text_region,
                 font,
                 settings.text_color,
                 settings.background_color,
