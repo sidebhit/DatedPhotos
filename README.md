@@ -1,6 +1,6 @@
 # Photo Converter (Windows 11)
 
-A simple Windows 11 desktop app that converts photos into **1800×1200** JPEG files with a white padding strip and the photo capture date.
+A standalone Windows desktop app that converts photos into dated JPEGs with white padding.
 
 ## What it does
 
@@ -10,31 +10,42 @@ A simple Windows 11 desktop app that converts photos into **1800×1200** JPEG fi
 
 Each output image:
 
-- Uses a fixed **1800×1200** canvas (6×4 landscape page).
+- **Landscape** sources → **1800×1200** canvas, white padding on the **right**, date written vertically in the strip.
+- **Portrait** sources → **1200×1800** canvas, white padding on the **bottom**, date written horizontally in the strip.
 - Scales the source photo **down to fit** without cropping (aspect ratio preserved).
-- Adds **white padding** on the **right** for landscape photos, or on the **bottom** for portrait photos.
-- Writes the **date the photo was taken** (from EXIF, or file date as fallback) in the padding area.
-- Draws the date **vertically**, parallel to the short edge of the page, centered in the padding.
+- Uses the **EXIF capture date** (or file date as fallback).
+- Date text is always parallel to the **short edge** of the page.
 
-You can adjust **text size** and **text color** in the UI before converting.
+You can adjust **text size** and **text color** before converting.
 
-## Requirements
+## Download (no dependencies)
 
-- Windows 11 (also runs on Windows 10)
-- [Python 3.10+](https://www.python.org/downloads/) — check **“Add python.exe to PATH”** during install
+Download `PhotoConverter.exe` from the latest [GitHub Actions build artifact](https://github.com/sidebhit/DatedPhotos/actions) or [release](https://github.com/sidebhit/DatedPhotos/releases). No Python install required — just run the `.exe`.
 
-## Setup
+## Build the `.exe` yourself
+
+On Windows:
 
 ```powershell
-cd path\to\DatedPhotos
+build.bat
+```
+
+Output: `dist\PhotoConverter.exe`
+
+Or manually:
+
+```powershell
+pip install -r requirements.txt
+pip install pyinstaller
+pyinstaller --noconfirm PhotoConverter.spec
+```
+
+## Run from source (development)
+
+```powershell
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-```
-
-## Run
-
-```powershell
 python main.py
 ```
 
@@ -44,17 +55,7 @@ JPEG, PNG, TIFF, BMP, WEBP
 
 Output is always JPEG (`.jpg`) at quality 95.
 
-## Build a standalone `.exe` (optional)
-
-```powershell
-pip install pyinstaller
-pyinstaller --onefile --windowed --name PhotoConverter main.py
-```
-
-The executable will be in `dist\PhotoConverter.exe`.
-
 ## Notes
 
 - Only files in the **selected folder** are processed (not subfolders).
 - The original files are never modified.
-- For portrait images, the photo is centered horizontally above the bottom padding strip.

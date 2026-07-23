@@ -13,7 +13,7 @@ from converter import ConversionSettings, convert_directory
 class PhotoConverterApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Photo Converter — 1800×1200")
+        self.title("Photo Converter")
         self.minsize(520, 320)
         self.resizable(True, False)
 
@@ -69,9 +69,9 @@ class PhotoConverterApp(tk.Tk):
         info = ttk.Label(
             main,
             text=(
-                "Each photo is scaled to fit inside 1800×1200 without cropping.\n"
-                "White padding is added on the right (landscape) or bottom (portrait).\n"
-                "The capture date is drawn vertically in the padding, parallel to the short page edge."
+                "Landscape photos become 1800×1200 with padding on the right.\n"
+                "Portrait photos become 1200×1800 with padding on the bottom.\n"
+                "The capture date is centered in the padding, parallel to the short page edge."
             ),
             justify=tk.LEFT,
             wraplength=480,
